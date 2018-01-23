@@ -1,105 +1,58 @@
-﻿using UnityEditor;
+﻿using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 
 namespace TRPG.Tools {
-    public class MapEditor : EditorWindow {
+    [CustomEditor(typeof(MapData))]
+    public class MapEditor : Editor {
 
-        private MapData currentMapData;
+        public GameObject tilePrefab;
+
+        private MapEditorSettings currentSettings;
         private SerializedObject currentMap;
-
-        private static MapEditorSettings currentMapEditorSettings;
-        private SerializedObject currentSettings;
 
         private bool toggleTiles = false;
         private Vector2 tilesScrollViewPos = Vector2.zero;
 
-        [MenuItem("Tools/Map Editor %M")]
-        static void Init()
+        private void OnEnable()
         {
-            MapEditor window = (MapEditor)EditorWindow.GetWindow(typeof(MapEditor));
-            window.titleContent = new GUIContent("Map editor");
-            window.Show();
-
-            if(!AssetDatabase.IsValidFolder("Assets/Data"))
-            {
-                AssetDatabase.CreateFolder("Assets", "Data");
-                AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-            }
-
-            if(!AssetDatabase.IsValidFolder("Assets/Data/MapEditor"))
-            {
-                AssetDatabase.CreateFolder("Assets/Data", "MapEditor");
-                AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-            }
-
-            var settings = AssetDatabase.LoadAssetAtPath<MapEditorSettings>("Assets/Data/MapEditor");
-
-            if(settings != null){
-                currentMapEditorSettings = settings;
-            } else {
-                settings = ScriptableObject.CreateInstance<MapEditorSettings>();
-                settings.MapDirectoryPath = "Assets/Resources";
-
-                AssetDatabase.CreateAsset(settings, "Assets/Data/MapEditor/MapEditorSettings.asset");
-                currentMapEditorSettings = settings;
-            }
+            SceneView.onSceneGUIDelegate = DrawSceneView;
+            if (SceneView.lastActiveSceneView) SceneView.lastActiveSceneView.Repaint();
         }
 
-        void OnGUI()
+        private void OnDisable()
         {
-            DrawSettingsSection();
+            SceneView.onSceneGUIDelegate = null;
+        }
 
-            EditorGUILayout.Separator();
+        public override void OnInspectorGUI() {
 
-            DrawTargetSection();
+            LoadMapData();
+            LoadSettingsDataOrCreateNew();
 
-            if(currentMapData!=null){
+            var mapTitleProp = currentMap.FindProperty("Title");
+            mapTitleProp.stringValue = EditorGUILayout.TextField("Title", mapTitleProp.stringValue);
 
-                currentMap = new SerializedObject(currentMapData);
+            currentMap.ApplyModifiedProperties();
+        }
 
-                var titleProperty = currentMap.FindProperty("Title");
-                var tilesProperty = currentMap.FindProperty("Tiles");
+        private void DrawSceneView(SceneView sceneView) {
 
-                EditorGUILayout.BeginVertical();
+            LoadMapData();
+            LoadSettingsDataOrCreateNew();
 
-                titleProperty.stringValue = EditorGUILayout.TextField(titleProperty.stringValue);
+            DrawSceneGrid(sceneView);
+            DrawAddTileHandles(sceneView);
 
-                DrawTilesSection(tilesProperty);
+            Handles.BeginGUI();
 
-                EditorGUILayout.EndVertical();
+            DrawSceneViewOverlay(sceneView);
+            DrawSceneToolbarGUI(sceneView);
 
-                currentMap.ApplyModifiedProperties();
-            }
+            Handles.EndGUI();
         }
 
         #region GUI Drawing
-
-        private void DrawSettingsSection(){
-            currentSettings = new SerializedObject(currentMapEditorSettings);
-
-            var mapDirectoryPathProperty = currentSettings.FindProperty("MapDirectoryPath");
-
-            EditorGUILayout.PropertyField(mapDirectoryPathProperty);
-
-            if(!AssetDatabase.IsValidFolder(mapDirectoryPathProperty.stringValue))
-                EditorGUILayout.LabelField(mapDirectoryPathProperty.stringValue + " is not a valid path.");
-
-            currentSettings.ApplyModifiedProperties();
-        }
-
-        private void DrawTargetSection() {
-
-            EditorGUILayout.BeginHorizontal();
-            currentMapData = (MapData)EditorGUILayout.ObjectField(currentMapData, typeof(MapData), false);
-            if(GUILayout.Button("New"))
-                currentMapData = CreateNewMap();
-            EditorGUILayout.EndHorizontal();
-
-            if(currentMapData == null)
-                EditorGUILayout.LabelField("No map has been selected. Create a new map or load an existing one to continue.");
-        }
 
         private void DrawTilesSection(SerializedProperty tilesProperty) {
 
@@ -119,20 +72,98 @@ namespace TRPG.Tools {
 
         #endregion
 
+        #region SceneGUI Drawing
+
+        private void DrawSceneToolbarGUI(SceneView sceneView) {
+            Rect toolbarRect = new Rect(0f, sceneView.position.height - EditorGUIUtility.singleLineHeight - 18f, sceneView.position.width, EditorGUIUtility.singleLineHeight);
+
+            GUI.BeginGroup(toolbarRect, EditorStyles.toolbar);
+            GUI.Label(new Rect(0f,0f, 160f, EditorGUIUtility.singleLineHeight), currentMap.FindProperty("Title").stringValue, EditorStyles.miniLabel);
+            GUI.EndGroup();
+        }
+
+        private void DrawSceneViewOverlay(SceneView sceneView) {
+            Rect overlayRect = sceneView.position;
+
+            var mapTitleStyle = new GUIStyle(EditorStyles.boldLabel);
+            mapTitleStyle.fontSize = 21;
+
+            GUILayout.BeginArea(new Rect(10f, 10f, 300f, 54f));
+            GUILayout.Label(currentMap.FindProperty("Title").stringValue, mapTitleStyle);
+            GUILayout.EndArea();
+
+        }
+
+        #endregion
+
+        #region Scene Drawing
+
+        private void DrawSceneGrid(SceneView sceneView){
+            
+            List<Vector3> lines = new List<Vector3>();
+
+            for(int x = -currentSettings.MaxWidth / 2; x < currentSettings.MaxWidth / 2 + 1; x++){
+                lines.Add(new Vector3(x, 0f, -currentSettings.MaxDepth/2));
+                lines.Add(new Vector3(x, 0f, currentSettings.MaxDepth/2));
+            }
+
+            for(int z = -currentSettings.MaxDepth / 2; z < currentSettings.MaxDepth / 2 + 1; z++){
+                lines.Add(new Vector3(currentSettings.MaxWidth / 2, 0f, z));
+                lines.Add(new Vector3(-currentSettings.MaxWidth / 2, 0f, z));
+            }
+
+            Handles.color = Color.white;
+            Handles.DrawLines(lines.ToArray());
+        }
+
+        private void DrawAddTileHandles(SceneView sceneView) {
+
+            if(currentMap.FindProperty("Tiles").arraySize > 0){
+                // Iterate over the tiles array
+            } else {
+                Handles.color = Color.red;
+                Handles.SphereHandleCap(0, Vector3.up, Quaternion.identity, 1f, EventType.Repaint);
+            }
+
+        }
+
+        #endregion
+
         #region Map methods
 
         private MapData CreateNewMap(){
             MapData newMap = ScriptableObject.CreateInstance<MapData>();
+            var folderPath = currentSettings.MapDirectoryPath;
 
-            if(AssetDatabase.IsValidFolder(currentMapEditorSettings.MapDirectoryPath))
+            if(AssetDatabase.IsValidFolder(folderPath))
             {
-                AssetDatabase.CreateAsset(newMap, AssetDatabase.GenerateUniqueAssetPath(currentMapEditorSettings.MapDirectoryPath + "/Map.asset"));
+                AssetDatabase.CreateAsset(newMap, AssetDatabase.GenerateUniqueAssetPath(folderPath + "/Map.asset"));
                 return newMap;
             }
             return newMap;
         }
 
         #endregion
+
+        #region Settings data
+
+        private void LoadSettingsDataOrCreateNew() {
+            if(currentSettings != null) return;
+
+            currentSettings = AssetDatabase.LoadAssetAtPath<MapEditorSettings>("Assets/Data/MapEditor/MapEditorSettings.asset");
+
+            if(currentSettings == null)
+                Debug.LogError("The map editor settings doesn't exists. It should be located in Assets/Data/MapEditor/MapEditorSettings.asset.");
+        }
+
+        #endregion
+
+        private void LoadMapData(){
+            if(target != null) {
+                if(currentMap == null)
+                    currentMap = new SerializedObject((MapData)target);
+            }
+        }
     }
 }
 

@@ -12,3 +12,7 @@ MonoBehaviour:
   m_Name: MapEditorSettings
   m_EditorClassIdentifier: 
   MapDirectoryPath: Assets/Resources
+  MaxWidth: 8
+  MaxHeight: 2
+  MaxDepth: 8
+  TilePrefab: {fileID: 1839666189255038, guid: 8174227b5d9631b4d8cf16035e70e68c, type: 2}

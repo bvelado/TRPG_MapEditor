@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace TRPG {
+    [CreateAssetMenu(fileName="New Map", menuName="Map", order = 1000)]
     public class MapData : ScriptableObject {
-        public Tile[] Tiles = new Tile[0];
         public string Title;
+        public Tile[] Tiles = new Tile[0];
+        
 
         public void AddTile(Tile tile){
             if(!Contains(tile) && !HasTileAtPosition(tile.Position)) {
